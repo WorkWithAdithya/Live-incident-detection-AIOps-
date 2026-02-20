@@ -1,0 +1,23 @@
+# System monitoring
+psutil==6.0.0
+
+# Database
+psycopg2-binary==2.9.9
+
+# Environment variables
+python-dotenv==1.0.1
+
+# Data processing
+pandas==2.2.0
+numpy==1.26.3
+openpyxl==3.1.2
+
+# Machine Learning
+tensorflow==2.19.1
+scikit-learn==1.4.0
+
+# Visualization
+matplotlib==3.8.2
+
+# Optional: For better progress bars
+tqdm==4.66.1
