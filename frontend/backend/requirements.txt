@@ -1,0 +1,16 @@
+# frontend/backend/requirements.txt
+
+# ── Web framework ──
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+
+# ── ML (same as ai_model) ──
+torch>=2.2.0
+numpy>=1.26.0
+scikit-learn>=1.4.0
+pandas>=2.1.0
+
+# ── DB + config ──
+psycopg2-binary>=2.9.0
+python-dotenv>=1.0.0
