@@ -1,9 +1,5 @@
 // src/api.js
-// All communication with the FastAPI backend
-
 const BASE = '/api'
-
-// ── REST helpers ──────────────────────────────────────────────────────────────
 
 export async function fetchModelStatus() {
   const r = await fetch(`${BASE}/model/status`)
@@ -24,10 +20,15 @@ export async function setThreshold(value) {
   return r.json()
 }
 
-export async function fetchHistory(n = 120) {
-  const r = await fetch(`${BASE}/history?n=${n}`)
+export async function fetchLogs(n = 200) {
+  /**
+   * Fetches rows DIRECTLY from NeonDB via backend.
+   * Each row: { id, timestamp, cpu, memory, disk }
+   * Used to hydrate the charts on page load — reflects real DB data.
+   */
+  const r = await fetch(`${BASE}/logs?n=${n}`)
   const d = await r.json()
-  return d.history ?? []
+  return d.logs ?? []
 }
 
 export async function fetchAlerts(n = 50) {
@@ -47,29 +48,32 @@ export async function runEvaluation() {
   return r.json()
 }
 
-// ── SSE stream ────────────────────────────────────────────────────────────────
-
-/**
- * Opens an SSE connection to /stream.
- * Calls onMessage(parsedData) for each event.
- * Returns a cleanup function to close the connection.
- */
 export function openStream(onMessage, onError) {
   const es = new EventSource('/stream')
-
   es.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data)
-      onMessage(data)
-    } catch (err) {
-      console.warn('SSE parse error:', err)
-    }
+    try { onMessage(JSON.parse(e.data)) }
+    catch (err) { console.warn('SSE parse error:', err) }
   }
-
   es.onerror = (e) => {
     console.error('SSE error:', e)
     if (onError) onError(e)
   }
-
   return () => es.close()
+}
+
+export async function sendRuleAlert({ severity, cpu, memory, disk, exceeded, threshold_info }) {
+  try {
+    await fetch(`${BASE}/alert/rule`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ severity, cpu, memory, disk, exceeded, threshold_info }),
+    })
+  } catch (e) {
+    console.warn('Failed to send rule alert email:', e)
+  }
+}
+
+export async function fetchEmailStatus() {
+  const r = await fetch(`${BASE}/alert/email-status`)
+  return r.json()
 }
