@@ -44,12 +44,20 @@ _ENV_PATH = (
 load_dotenv(dotenv_path=_ENV_PATH)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-EMAIL_FROM        = os.getenv("ALERT_EMAIL_FROM",       "")
-EMAIL_PASSWORD    = os.getenv("ALERT_EMAIL_PASSWORD",   "")
-EMAIL_TO          = os.getenv("ALERT_EMAIL_TO",         "")
-SMTP_HOST         = os.getenv("ALERT_SMTP_HOST",        "smtp.gmail.com")
-SMTP_PORT         = int(os.getenv("ALERT_SMTP_PORT",    "587"))
-COOLDOWN_SECONDS  = int(os.getenv("ALERT_COOLDOWN_SECONDS", "300"))
+# Strips inline comments from .env values (e.g. "value  # comment")
+def _env(key: str, default: str = "") -> str:
+    val = os.getenv(key, default).strip()
+    for sep in ("  #", " #", "\t#"):
+        if sep in val:
+            val = val[:val.index(sep)].strip()
+    return val
+
+EMAIL_FROM        = _env("ALERT_EMAIL_FROM")
+EMAIL_PASSWORD    = _env("ALERT_EMAIL_PASSWORD")
+EMAIL_TO          = _env("ALERT_EMAIL_TO")
+SMTP_HOST         = _env("ALERT_SMTP_HOST") or "smtp.gmail.com"
+SMTP_PORT         = int(_env("ALERT_SMTP_PORT") or "587")
+COOLDOWN_SECONDS  = int(_env("ALERT_COOLDOWN_SECONDS") or "300")
 
 
 class EmailNotifier:
@@ -64,12 +72,30 @@ class EmailNotifier:
         self._enabled       = self._check_config()
 
     def _check_config(self) -> bool:
+        # Print loaded values for easy debugging (password masked)
+        print(f"   ALERT_EMAIL_FROM     : {EMAIL_FROM or '(not set)'}")
+        print(f"   ALERT_EMAIL_PASSWORD : {'*' * len(EMAIL_PASSWORD) if EMAIL_PASSWORD else '(not set)'}")
+        print(f"   ALERT_EMAIL_TO       : {EMAIL_TO or '(not set)'}")
+        print(f"   ALERT_SMTP_HOST      : {SMTP_HOST}")
+        print(f"   ALERT_SMTP_PORT      : {SMTP_PORT}")
+        print(f"   ALERT_COOLDOWN_SECS  : {COOLDOWN_SECONDS}")
+
         if not EMAIL_FROM or not EMAIL_PASSWORD or not EMAIL_TO:
             print(
                 "⚠️  Email alerts disabled — set ALERT_EMAIL_FROM, "
                 "ALERT_EMAIL_PASSWORD, ALERT_EMAIL_TO in log_generator/.env"
             )
             return False
+
+        # Warn if password looks like a regular password (not a 16-char app password)
+        clean_pw = EMAIL_PASSWORD.replace(" ", "")
+        if len(clean_pw) != 16:
+            print(
+                f"⚠️  ALERT_EMAIL_PASSWORD is {len(clean_pw)} chars "
+                f"(expected 16 for Gmail App Password). "
+                f"Regular Gmail passwords are blocked by Google."
+            )
+
         print(
             f"✅ Email alerts enabled → {EMAIL_TO}  "
             f"(cooldown: {COOLDOWN_SECONDS}s)"
