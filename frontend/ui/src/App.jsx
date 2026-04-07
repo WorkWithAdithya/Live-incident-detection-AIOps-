@@ -279,7 +279,7 @@ export default function App() {
             <AlertFeed alerts={alerts} />
           </div>
           <div style={{ height:'280px', flexShrink:0 }}>
-            <PredictionPanel history={history} />
+            <PredictionPanel history={history} limits={limits} />
           </div>
         </div>
 
