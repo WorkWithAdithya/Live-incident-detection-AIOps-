@@ -1,27 +1,27 @@
 """
 frontend/backend/main.py
 ------------------------
-FastAPI backend for the AIOps Incident Detection Dashboard.
+FastAPI backend — Phase 2 update.
 
-Key fix: /logs fetches all rows directly from NeonDB so the frontend
-chart always reflects real DB data, not just in-memory state.
-SSE stream tracks last_seen_id and only pushes genuinely new rows.
+Changes from Phase 1:
+  - AppState now stores user limits (forwarded to InferenceEngine.run())
+  - POST /limits    : frontend sends current user-set metric limits
+  - GET  /forecast  : returns latest forecast snapshot on demand
+  - SSE stream      : each event now includes forecast + forecast_breaches
+  - InferenceEngine.run(limits) called with current limits every cycle
 """
 
 import os
 import sys
 import json
-import time
 import asyncio
-import pickle
+import psycopg2
 from pathlib import Path
 from datetime import datetime
 from contextlib import asynccontextmanager
 from typing import Optional
 
 import numpy as np
-import psycopg2
-import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -41,9 +41,9 @@ DATABASE_URL     = os.getenv("DATABASE_URL")
 LOG_INTERVAL_SEC = int(os.getenv("LOG_INTERVAL_SECONDS", 5))
 
 from inference_engine import InferenceEngine
-from evaluator import Evaluator
-from session_metrics import SessionMetrics
-from email_notifier import notifier as email_notifier
+from evaluator        import Evaluator
+from session_metrics  import SessionMetrics
+from email_notifier   import notifier as email_notifier
 
 
 # ── App state ─────────────────────────────────────────────────────────────────
@@ -51,6 +51,16 @@ class AppState:
     engine:          Optional[InferenceEngine] = None
     session_metrics: SessionMetrics            = SessionMetrics()
     alerts:          list                      = []
+    latest_forecast: list                      = []   # last forecaster output
+    # User-set limits — updated by POST /limits, passed to engine.run()
+    limits: dict = {
+        "cpu_warning":    None,
+        "cpu_critical":   None,
+        "memory_warning": None,
+        "memory_critical":None,
+        "disk_warning":   None,
+        "disk_critical":  None,
+    }
     MAX_ALERTS = 100
 
 state = AppState()
@@ -59,21 +69,14 @@ state = AppState()
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 def db_fetch_logs(limit: int = 200, after_id: int = 0) -> list:
-    """
-    Fetch rows from system_logs directly from NeonDB.
-    If after_id > 0, only fetch rows with id > after_id (new rows only).
-    Returns list of dicts ordered by timestamp ASC.
-    """
     conn   = psycopg2.connect(DATABASE_URL)
     cursor = conn.cursor()
     if after_id > 0:
         cursor.execute(
             """
             SELECT id, timestamp, cpu_usage, memory_usage, disk_usage
-            FROM system_logs
-            WHERE id > %s
-            ORDER BY timestamp ASC
-            LIMIT %s
+            FROM system_logs WHERE id > %s
+            ORDER BY timestamp ASC LIMIT %s
             """,
             (after_id, limit)
         )
@@ -82,8 +85,7 @@ def db_fetch_logs(limit: int = 200, after_id: int = 0) -> list:
             """
             SELECT id, timestamp, cpu_usage, memory_usage, disk_usage
             FROM system_logs
-            ORDER BY timestamp DESC
-            LIMIT %s
+            ORDER BY timestamp DESC LIMIT %s
             """,
             (limit,)
         )
@@ -100,16 +102,12 @@ def db_fetch_logs(limit: int = 200, after_id: int = 0) -> list:
             "memory"   : float(r[3]),
             "disk"     : float(r[4]),
         })
-
-    # If fetching latest (no after_id), reverse to get ASC order
     if after_id == 0:
         result = list(reversed(result))
-
     return result
 
 
 def db_max_id() -> int:
-    """Returns the current max id in system_logs."""
     try:
         conn   = psycopg2.connect(DATABASE_URL)
         cursor = conn.cursor()
@@ -128,7 +126,6 @@ async def lifespan(app: FastAPI):
     print("🚀 AIOps backend starting...")
     try:
         state.engine = InferenceEngine(_SAVED_DIR)
-        print("✅ Model auto-loaded on startup")
     except Exception as e:
         print(f"⚠️  Model not auto-loaded: {e}")
     yield
@@ -136,39 +133,50 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="AIOps Incident Detection API", lifespan=lifespan)
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
 
 
-# ── Pydantic ──────────────────────────────────────────────────────────────────
+# ── Pydantic models ───────────────────────────────────────────────────────────
 class ThresholdRequest(BaseModel):
     threshold: float
 
+class LimitsRequest(BaseModel):
+    cpu_warning:     Optional[float] = None
+    cpu_critical:    Optional[float] = None
+    memory_warning:  Optional[float] = None
+    memory_critical: Optional[float] = None
+    disk_warning:    Optional[float] = None
+    disk_critical:   Optional[float] = None
+
 class RuleAlertRequest(BaseModel):
-    severity:       str          # "WARNING" | "CRITICAL"
+    severity:       str
     cpu:            float
     memory:         float
     disk:           float
-    exceeded:       list         # list of breach description strings
-    threshold_info: dict         # { label: value } of active limits
+    exceeded:       list
+    threshold_info: dict
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 def root():
-    return {"status": "ok", "service": "AIOps Backend", "time": datetime.now().isoformat()}
+    return {
+        "status"          : "ok",
+        "service"         : "AIOps Backend",
+        "forecaster_ready": state.engine.forecaster_ready if state.engine else False,
+        "time"            : datetime.now().isoformat(),
+    }
 
 
 @app.get("/model/status")
 def model_status():
     if state.engine is None:
-        return {"loaded": False, "threshold": None, "default_threshold": None}
+        return {"loaded": False, "threshold": None, "default_threshold": None,
+                "forecaster_ready": False}
     return {
         "loaded"           : True,
         "threshold"        : state.engine.threshold,
@@ -176,6 +184,7 @@ def model_status():
         "mean_error"       : state.engine.mean_error,
         "std_error"        : state.engine.std_error,
         "optimal_threshold": state.engine.optimal_threshold,
+        "forecaster_ready" : state.engine.forecaster_ready,
     }
 
 
@@ -183,9 +192,72 @@ def model_status():
 def load_model():
     try:
         state.engine = InferenceEngine(_SAVED_DIR)
-        return {"success": True, "threshold": state.engine.threshold}
+        return {
+            "success"         : True,
+            "threshold"       : state.engine.threshold,
+            "forecaster_ready": state.engine.forecaster_ready,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/model/reload-forecaster")
+def reload_forecaster():
+    """
+    Hot-reloads just the forecaster without restarting the server.
+    Call this after running python -m model.train_forecaster.
+    """
+    if state.engine is None:
+        raise HTTPException(status_code=400, detail="Load the main model first")
+    try:
+        fc_path = _SAVED_DIR / "lstm_forecaster.pth"
+        if not fc_path.exists():
+            return {
+                "success": False,
+                "message": f"lstm_forecaster.pth not found at {fc_path}. Train it first.",
+                "looked_at": str(fc_path),
+            }
+        import sys as _sys, torch, traceback
+        _ai_model_dir = str(_SAVED_DIR.parent)
+        if _ai_model_dir not in _sys.path:
+            _sys.path.insert(0, _ai_model_dir)
+        from model.lstm_forecaster import LSTMForecaster
+        fc = LSTMForecaster(
+            input_size=3, hidden_size=128, num_layers=2,
+            dropout=0.2, lookback=60, horizon=12,
+        )
+        fc.load_state_dict(torch.load(str(fc_path), map_location="cpu", weights_only=True))
+        fc.eval()
+        state.engine.forecaster       = fc
+        state.engine.forecaster_ready = True
+        return {
+            "success"         : True,
+            "forecaster_ready": True,
+            "message"         : f"Forecaster loaded from {fc_path}",
+        }
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        return {"success": False, "message": str(e), "traceback": tb}
+
+
+@app.get("/model/debug-paths")
+def debug_paths():
+    """Returns resolved paths so you can verify the backend is looking in the right place."""
+    import os
+    saved_contents = []
+    if _SAVED_DIR.exists():
+        saved_contents = [f.name for f in _SAVED_DIR.iterdir()]
+    return {
+        "project_root"    : str(_PROJECT_ROOT),
+        "ai_model_dir"    : str(_AI_MODEL_DIR),
+        "saved_dir"       : str(_SAVED_DIR),
+        "saved_dir_exists": _SAVED_DIR.exists(),
+        "saved_contents"  : sorted(saved_contents),
+        "forecaster_file" : str(_SAVED_DIR / "lstm_forecaster.pth"),
+        "forecaster_exists": (_SAVED_DIR / "lstm_forecaster.pth").exists(),
+        "forecaster_ready": state.engine.forecaster_ready if state.engine else False,
+    }
 
 
 @app.post("/threshold")
@@ -198,13 +270,23 @@ def set_threshold(req: ThresholdRequest):
     return {"success": True, "threshold": req.threshold}
 
 
+@app.post("/limits")
+def set_limits(req: LimitsRequest):
+    """
+    Receives the user-set metric limits from the frontend.
+    Stored in AppState and forwarded to engine.run() on every SSE cycle.
+    """
+    state.limits = req.dict()
+    return {"success": True, "limits": state.limits}
+
+
+@app.get("/limits")
+def get_limits():
+    return {"limits": state.limits}
+
+
 @app.get("/logs")
 def get_logs(n: int = 200):
-    """
-    Fetches the last n rows DIRECTLY from NeonDB system_logs.
-    This is what the frontend uses to hydrate charts on load —
-    it reflects the actual database, not in-memory state.
-    """
     try:
         rows = db_fetch_logs(limit=n)
         return {"logs": rows, "count": len(rows)}
@@ -215,6 +297,19 @@ def get_logs(n: int = 200):
 @app.get("/alerts")
 def get_alerts(n: int = 50):
     return {"alerts": state.alerts[-n:]}
+
+
+@app.get("/forecast")
+def get_forecast():
+    """
+    Returns the latest LSTM forecast snapshot.
+    The frontend can poll this on demand (e.g. on page load).
+    """
+    return {
+        "forecast"        : state.latest_forecast,
+        "forecaster_ready": state.engine.forecaster_ready if state.engine else False,
+        "timestamp"       : datetime.now().isoformat(),
+    }
 
 
 @app.get("/session/metrics")
@@ -235,13 +330,8 @@ def run_evaluation():
 
 @app.post("/alert/rule")
 async def rule_alert(req: RuleAlertRequest):
-    """
-    Called by the frontend whenever a user-set metric limit is breached.
-    Triggers an email notification if not on cooldown.
-    """
     if req.severity not in ("WARNING", "CRITICAL"):
         return {"sent": False, "reason": "severity must be WARNING or CRITICAL"}
-
     email_notifier.notify(
         severity       = req.severity,
         metrics        = {"cpu": req.cpu, "memory": req.memory, "disk": req.disk},
@@ -257,12 +347,11 @@ async def rule_alert(req: RuleAlertRequest):
 
 @app.get("/alert/email-status")
 def email_status():
-    """Returns whether email alerting is configured and enabled."""
     return {
         "enabled"  : email_notifier.enabled,
-        "to"       : os.getenv("ALERT_EMAIL_TO",   "") or "not configured",
-        "from"     : os.getenv("ALERT_EMAIL_FROM",  "") or "not configured",
-        "smtp_host": os.getenv("ALERT_SMTP_HOST",   "smtp.gmail.com"),
+        "to"       : os.getenv("ALERT_EMAIL_TO",  "") or "not configured",
+        "from"     : os.getenv("ALERT_EMAIL_FROM", "") or "not configured",
+        "smtp_host": os.getenv("ALERT_SMTP_HOST",  "smtp.gmail.com"),
         "cooldown" : int(os.getenv("ALERT_COOLDOWN_SECONDS", "300")),
     }
 
@@ -271,15 +360,12 @@ def email_status():
 
 async def inference_stream():
     """
-    SSE generator. Every LOG_INTERVAL_SECONDS:
-      1. Fetches all new DB rows since last poll (by id)
-      2. Runs LSTM inference on the latest window
-      3. Pushes each new row enriched with LSTM result to the frontend
-
-    This ensures every distinct DB row is shown in the frontend —
-    no duplicates, no missing rows.
+    SSE generator — every LOG_INTERVAL_SECONDS:
+      1. Fetch new DB rows since last poll (by id)
+      2. Run BOTH models via engine.run(limits)
+      3. Push each new row enriched with detection + forecast data
     """
-    last_id = db_max_id()   # start from current max so we only push new rows
+    last_id = db_max_id()
 
     while True:
         await asyncio.sleep(LOG_INTERVAL_SEC)
@@ -289,48 +375,57 @@ async def inference_stream():
             continue
 
         try:
-            # ── 1. Fetch new rows from DB since last poll ──────────────────
+            # ── Fetch new rows ────────────────────────────────────────────────
             new_rows = db_fetch_logs(limit=50, after_id=last_id)
 
             if not new_rows:
-                # No new rows yet — push a heartbeat so frontend knows stream is alive
                 yield f"data: {json.dumps({'status': 'no_new_rows', 'last_id': last_id})}\n\n"
                 continue
 
-            # ── 2. Run LSTM inference (uses the latest full window) ────────
-            lstm_result = state.engine.run()
+            # ── Run both models with current user limits ───────────────────────
+            result = state.engine.run(limits=state.limits)
 
-            # ── 3. Enrich each new row with LSTM result and push ──────────
+            if result.get("status") != "ok":
+                yield f"data: {json.dumps({'status': result.get('status', 'error')})}\n\n"
+                continue
+
+            # Cache latest forecast for GET /forecast
+            state.latest_forecast = result.get("forecast", [])
+
+            # ── Push one SSE event per new DB row ─────────────────────────────
             for row in new_rows:
                 last_id = max(last_id, row["id"])
 
                 entry = {
-                    "status"     : "ok",
-                    "id"         : row["id"],
-                    "timestamp"  : row["timestamp"],
-                    "cpu"        : row["cpu"],
-                    "memory"     : row["memory"],
-                    "disk"       : row["disk"],
-                    # LSTM fields — same for all rows in this batch
-                    # (they share the same inference window)
-                    "error"      : lstm_result.get("error", 0),
-                    "threshold"  : lstm_result.get("threshold", state.engine.threshold),
-                    "error_ratio": lstm_result.get("error_ratio", 0),
-                    "severity"   : lstm_result.get("severity", "NORMAL"),
-                    "is_anomaly" : lstm_result.get("is_anomaly", False),
-                    "actual_rows": lstm_result.get("actual_rows", 0),
-                    "warming_up" : lstm_result.get("warming_up", False),
-                    "flagged"    : lstm_result.get("flagged_metrics", []),
+                    "status"           : "ok",
+                    "id"               : row["id"],
+                    "timestamp"        : row["timestamp"],
+                    "cpu"              : row["cpu"],
+                    "memory"           : row["memory"],
+                    "disk"             : row["disk"],
+                    # Detection (autoencoder)
+                    "error"            : result["error"],
+                    "threshold"        : result["threshold"],
+                    "error_ratio"      : result["error_ratio"],
+                    "severity"         : result["severity"],
+                    "is_anomaly"       : result["is_anomaly"],
+                    "actual_rows"      : result["actual_rows"],
+                    "warming_up"       : result["warming_up"],
+                    "flagged"          : result["flagged_metrics"],
+                    # Prediction (forecaster)
+                    "forecast"         : result["forecast"],
+                    "forecast_breaches": result["forecast_breaches"],
+                    "forecaster_ready" : result["forecaster_ready"],
                 }
 
                 # Track session metrics
                 state.session_metrics.update(
-                    is_anomaly=entry["is_anomaly"],
-                    error=entry["error"],
-                    threshold=entry["threshold"],
+                    is_anomaly = entry["is_anomaly"],
+                    error      = entry["error"],
+                    threshold  = entry["threshold"],
                 )
 
-                # Store alerts
+                # Store LSTM anomaly alerts
                 if entry["is_anomaly"]:
                     state.alerts.append(entry)
                     if len(state.alerts) > state.MAX_ALERTS:
@@ -340,9 +435,15 @@ async def inference_stream():
                 if entry["severity"] in ("WARNING", "CRITICAL"):
                     email_notifier.notify(
                         severity       = entry["severity"],
-                        metrics        = {"cpu": entry["cpu"], "memory": entry["memory"], "disk": entry["disk"]},
+                        metrics        = {
+                            "cpu":    entry["cpu"],
+                            "memory": entry["memory"],
+                            "disk":   entry["disk"],
+                        },
                         exceeded       = entry.get("flagged", []),
-                        threshold_info = {"LSTM Threshold": round(entry["threshold"], 6)},
+                        threshold_info = {
+                            "LSTM Threshold": round(entry["threshold"], 6)
+                        },
                     )
 
                 yield f"data: {json.dumps(entry)}\n\n"

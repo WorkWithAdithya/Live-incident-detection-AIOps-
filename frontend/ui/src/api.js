@@ -21,11 +21,6 @@ export async function setThreshold(value) {
 }
 
 export async function fetchLogs(n = 200) {
-  /**
-   * Fetches rows DIRECTLY from NeonDB via backend.
-   * Each row: { id, timestamp, cpu, memory, disk }
-   * Used to hydrate the charts on page load — reflects real DB data.
-   */
   const r = await fetch(`${BASE}/logs?n=${n}`)
   const d = await r.json()
   return d.logs ?? []
@@ -48,6 +43,53 @@ export async function runEvaluation() {
   return r.json()
 }
 
+/**
+ * Sends the user-set metric limits to the backend.
+ * Backend stores them and passes to engine.run() on every SSE cycle.
+ * Call this every time the user clicks "Set Value".
+ */
+export async function syncLimits(limits) {
+  try {
+    await fetch(`${BASE}/limits`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(limits),
+    })
+  } catch (e) {
+    console.warn('Failed to sync limits to backend:', e)
+  }
+}
+
+/**
+ * Fetches the latest LSTM forecast snapshot from the backend.
+ * Returns { forecast: [...12 steps], forecaster_ready: bool }
+ */
+export async function fetchForecast() {
+  const r = await fetch(`${BASE}/forecast`)
+  return r.json()
+}
+
+export async function sendRuleAlert({
+  severity, cpu, memory, disk, exceeded, threshold_info
+}) {
+  try {
+    await fetch(`${BASE}/alert/rule`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        severity, cpu, memory, disk, exceeded, threshold_info
+      }),
+    })
+  } catch (e) {
+    console.warn('Failed to send rule alert email:', e)
+  }
+}
+
+export async function fetchEmailStatus() {
+  const r = await fetch(`${BASE}/alert/email-status`)
+  return r.json()
+}
+
 export function openStream(onMessage, onError) {
   const es = new EventSource('/stream')
   es.onmessage = (e) => {
@@ -61,19 +103,12 @@ export function openStream(onMessage, onError) {
   return () => es.close()
 }
 
-export async function sendRuleAlert({ severity, cpu, memory, disk, exceeded, threshold_info }) {
-  try {
-    await fetch(`${BASE}/alert/rule`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ severity, cpu, memory, disk, exceeded, threshold_info }),
-    })
-  } catch (e) {
-    console.warn('Failed to send rule alert email:', e)
-  }
+export async function reloadForecaster() {
+  const r = await fetch(`${BASE}/model/reload-forecaster`, { method: 'POST' })
+  return r.json()
 }
 
-export async function fetchEmailStatus() {
-  const r = await fetch(`${BASE}/alert/email-status`)
+export async function fetchDebugPaths() {
+  const r = await fetch(`${BASE}/model/debug-paths`)
   return r.json()
 }

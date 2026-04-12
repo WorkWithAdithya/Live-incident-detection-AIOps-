@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-LOG_INTERVAL_SECONDS = int(os.getenv("LOG_INTERVAL_SECONDS", 5))
+LOG_INTERVAL_SECONDS = int(os.getenv("LOG_INTERVAL_SECONDS", 1))
 LOG_RETENTION_HOURS = int(os.getenv("LOG_RETENTION_HOURS", 24))
 CLEANUP_INTERVAL_SECONDS = int(os.getenv("CLEANUP_INTERVAL_SECONDS", 3600))
 
