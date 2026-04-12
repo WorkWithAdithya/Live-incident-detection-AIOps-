@@ -352,4 +352,4 @@ export default function PredictionPanel({ latest, limits, forecasterReady: forec
       )}
     </div>
   )
-}
+}     
