@@ -431,7 +431,7 @@ async def inference_stream():
                     if len(state.alerts) > state.MAX_ALERTS:
                         state.alerts.pop(0)
 
-                # Email on LSTM WARNING/CRITICAL
+                # ── Email: LSTM detection anomaly ─────────────────────────
                 if entry["severity"] in ("WARNING", "CRITICAL"):
                     email_notifier.notify(
                         severity       = entry["severity"],
@@ -443,6 +443,24 @@ async def inference_stream():
                         exceeded       = entry.get("flagged", []),
                         threshold_info = {
                             "LSTM Threshold": round(entry["threshold"], 6)
+                        },
+                    )
+
+                # ── Email: LSTM forecaster predicted breach ────────────────────
+                forecast_breaches = entry.get("forecast_breaches", [])
+                if forecast_breaches:
+                    worst_sev = (
+                        "CRITICAL"
+                        if any(b["severity"] == "CRITICAL" for b in forecast_breaches)
+                        else "WARNING"
+                    )
+                    email_notifier.notify_forecast_breach(
+                        severity        = worst_sev,
+                        breaches        = forecast_breaches,
+                        current_metrics = {
+                            "cpu":    entry["cpu"],
+                            "memory": entry["memory"],
+                            "disk":   entry["disk"],
                         },
                     )
 
