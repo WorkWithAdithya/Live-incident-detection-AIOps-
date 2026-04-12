@@ -1,12 +1,12 @@
 # 📁 Live-incident-detection-AIOps- - Project Structure
 
-*Generated on: 4/7/2026, 3:44:14 PM*
+*Generated on: 4/12/2026, 2:06:30 PM*
 
 ## 📋 Quick Overview
 
 | Metric | Value |
 |--------|-------|
-| 📄 Total Files | 22141 |
+| 📄 Total Files | 22149 |
 | 📁 Total Folders | 1721 |
 | 🌳 Max Depth | 14 levels |
 | 🛠️ Tech Stack | React, CSS, Node.js |
@@ -26,8 +26,8 @@
 
 ### By File Type
 
-- 📄 **.py** (Other files): 10100 files (45.6%)
-- 📄 **.h** (Other files): 9312 files (42.1%)
+- 📄 **.py** (Other files): 10104 files (45.6%)
+- 📄 **.h** (Other files): 9312 files (42.0%)
 - 📄 **.pyi** (Other files): 475 files (2.1%)
 - 📄 **.** (Other files): 391 files (1.8%)
 - 📄 **.so** (Other files): 290 files (1.3%)
@@ -42,8 +42,8 @@
 - 📄 **.typed** (Other files): 57 files (0.3%)
 - 📄 **.cuh** (Other files): 57 files (0.3%)
 - 📄 **.sav** (Other files): 47 files (0.2%)
+- 🖼️ **.png** (PNG images): 44 files (0.2%)
 - 📄 **.cpp** (Other files): 43 files (0.2%)
-- 🖼️ **.png** (PNG images): 41 files (0.2%)
 - 📄 **.csv** (Other files): 39 files (0.2%)
 - 🔤 **.ttf** (TrueType fonts): 38 files (0.2%)
 - 📄 **.npy** (Other files): 32 files (0.1%)
@@ -82,6 +82,7 @@
 - 📄 **.ini** (Other files): 4 files (0.0%)
 - 📄 **.2** (Other files): 4 files (0.0%)
 - 📄 **.pxi** (Other files): 4 files (0.0%)
+- 📄 **.pth** (Other files): 3 files (0.0%)
 - 📄 **.z** (Other files): 3 files (0.0%)
 - 🖼️ **.jpg** (JPEG images): 3 files (0.0%)
 - 📄 **.17** (Other files): 3 files (0.0%)
@@ -89,7 +90,6 @@
 - 📄 **.nc** (Other files): 3 files (0.0%)
 - 📄 **.xsl** (Other files): 3 files (0.0%)
 - 🚫 **.gitignore** (Git ignore): 2 files (0.0%)
-- 📄 **.pth** (Other files): 2 files (0.0%)
 - 📄 **.a99** (Other files): 2 files (0.0%)
 - 📄 **.b99** (Other files): 2 files (0.0%)
 - 📄 **.a** (Other files): 2 files (0.0%)
@@ -126,9 +126,9 @@
 
 ### By Category
 
-- **Other**: 21849 files (98.7%)
+- **Other**: 21854 files (98.7%)
 - **Docs**: 146 files (0.7%)
-- **Assets**: 101 files (0.5%)
+- **Assets**: 104 files (0.5%)
 - **Config**: 13 files (0.1%)
 - **React**: 10 files (0.0%)
 - **Styles**: 8 files (0.0%)
@@ -138,7 +138,7 @@
 
 ### 📁 Largest Directories
 
-- **root**: 22141 files
+- **root**: 22149 files
 - **venv**: 22084 files
 - **venv/lib/python3.13/site-packages**: 22079 files
 - **venv/lib/python3.13**: 22079 files
@@ -155,9 +155,13 @@ Live-incident-detection-AIOps-/
 │   │   └── 📄 synthetic_logs.csv
 │   ├── 📂 model/
 │   │   ├── 📄 dataset.py
+│   │   ├── 📄 evaluate_forecaster.py
 │   │   ├── 📄 evaluate.py
+│   │   ├── 📄 forecaster_dataset.py
 │   │   ├── 📄 inference.py
 │   │   ├── 📄 lstm_autoencoder.py
+│   │   ├── 📄 lstm_forecaster.py
+│   │   ├── 📄 train_forecaster.py
 │   │   └── 📄 train.py
 │   ├── 📄 requirements.txt
 │   └── 📂 saved/
@@ -165,7 +169,11 @@ Live-incident-detection-AIOps-/
 │   │   ├── 🖼️ confusion_matrix.png
 │   │   ├── 🖼️ error_boxplot.png
 │   │   ├── 🖼️ evaluation.png
+│   │   ├── 🖼️ forecaster_evaluation.png
+│   │   ├── 🖼️ forecaster_loss.png
+│   │   ├── 🖼️ forecaster_predictions.png
 │   │   ├── 📄 lstm_autoencoder.pth
+│   │   ├── 📄 lstm_forecaster.pth
 │   │   ├── 🖼️ metrics_dashboard.png
 │   │   ├── 🖼️ roc_curve.png
 │   │   ├── 📄 scaler.pkl
