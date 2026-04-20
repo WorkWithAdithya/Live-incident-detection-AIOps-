@@ -1,5 +1,5 @@
 // src/components/AlertFeed.jsx
-// Only shows WARNING and CRITICAL alerts — NORMAL rows are never displayed here.
+// Only shows WARNING alerts — NORMAL rows are never displayed here.
 
 import { useEffect, useRef } from 'react'
 
@@ -9,8 +9,7 @@ function formatTime(ts) {
 }
 
 function AlertRow({ alert }) {
-  const sev    = alert.severity ?? 'WARNING'
-  const source = alert.source   ?? 'lstm'
+  const source = alert.source ?? 'lstm'
 
   return (
     <div style={{
@@ -19,8 +18,8 @@ function AlertRow({ alert }) {
     }}>
       {/* Top row */}
       <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'3px' }}>
-        <span className={`dot ${sev.toLowerCase()}`} />
-        <span className={`badge ${sev}`}>{sev}</span>
+        <span className="dot warning" />
+        <span className="badge WARNING">WARNING</span>
 
         {/* Source tag */}
         <span style={{
@@ -57,7 +56,7 @@ function AlertRow({ alert }) {
       {alert.exceeded?.length > 0 && (
         <div style={{
           fontFamily:'var(--font-mono)', fontSize:'10px',
-          color:'var(--critical)', paddingLeft:'14px', marginTop:'2px',
+          color:'var(--warning)', paddingLeft:'14px', marginTop:'2px',
         }}>
           ↳ {alert.exceeded.join(' · ')}
         </div>
@@ -67,7 +66,7 @@ function AlertRow({ alert }) {
       {alert.flagged?.length > 0 && source === 'lstm' && (
         <div style={{
           fontFamily:'var(--font-mono)', fontSize:'10px',
-          color:'var(--critical)', paddingLeft:'14px', marginTop:'2px',
+          color:'var(--warning)', paddingLeft:'14px', marginTop:'2px',
         }}>
           ↳ {alert.flagged.join(' · ')}
         </div>
@@ -90,8 +89,8 @@ export default function AlertFeed({ alerts }) {
   const listRef = useRef(null)
   const prevLen = useRef(0)
 
-  // Only show WARNING and CRITICAL
-  const visible = alerts.filter(a => a.severity === 'WARNING' || a.severity === 'CRITICAL')
+  // Only show WARNING
+  const visible = alerts.filter(a => a.severity === 'WARNING')
 
   useEffect(() => {
     if (visible.length > prevLen.current && listRef.current) {
@@ -99,9 +98,6 @@ export default function AlertFeed({ alerts }) {
     }
     prevLen.current = visible.length
   }, [visible])
-
-  const warnCount = visible.filter(a => a.severity === 'WARNING').length
-  const critCount = visible.filter(a => a.severity === 'CRITICAL').length
 
   return (
     <div className="panel" style={{
@@ -120,7 +116,7 @@ export default function AlertFeed({ alerts }) {
         </span>
       </div>
 
-      {/* Count tiles — WARNING and CRITICAL only */}
+      {/* Count tile — WARNING only */}
       <div style={{ display:'flex', gap:'8px', marginBottom:'10px', flexShrink:0 }}>
         <div style={{
           flex:1, background:'var(--bg-panel2)', border:'1px solid var(--border)',
@@ -130,18 +126,7 @@ export default function AlertFeed({ alerts }) {
             WARNING
           </div>
           <div style={{ fontFamily:'var(--font-mono)', fontSize:'16px', fontWeight:'600', color:'var(--warning)' }}>
-            {warnCount}
-          </div>
-        </div>
-        <div style={{
-          flex:1, background:'var(--bg-panel2)', border:'1px solid var(--border)',
-          borderRadius:'var(--radius)', padding:'6px 8px', textAlign:'center',
-        }}>
-          <div style={{ fontFamily:'var(--font-mono)', fontSize:'9px', color:'var(--text-dimmer)', marginBottom:'2px' }}>
-            CRITICAL
-          </div>
-          <div style={{ fontFamily:'var(--font-mono)', fontSize:'16px', fontWeight:'600', color:'var(--critical)' }}>
-            {critCount}
+            {visible.length}
           </div>
         </div>
       </div>
@@ -154,7 +139,7 @@ export default function AlertFeed({ alerts }) {
             height:'60px', color:'var(--text-dimmer)',
             fontFamily:'var(--font-mono)', fontSize:'11px',
           }}>
-            No warnings or critical alerts yet
+            No warning alerts yet
           </div>
         ) : (
           [...visible].reverse().map((a, i) => (

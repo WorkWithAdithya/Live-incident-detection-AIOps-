@@ -1,5 +1,6 @@
 // src/components/AnomalyScoreChart.jsx
 // Bottom right: live anomaly score (reconstruction error) vs threshold
+// Only NORMAL and WARNING severity levels.
 
 import {
   ComposedChart, Line, Area, XAxis, YAxis,
@@ -26,7 +27,7 @@ const CustomTooltip = ({ active, payload, label }) => {
       fontSize:     '11px',
     }}>
       <div style={{ color:'var(--text-dimmer)', marginBottom:'4px' }}>{formatTick(label)}</div>
-      <div style={{ color: d?.is_anomaly ? 'var(--critical)' : 'var(--text)' }}>
+      <div style={{ color: d?.is_anomaly ? 'var(--warning)' : 'var(--text)' }}>
         Error: {d?.error?.toFixed(6)}
       </div>
       <div style={{ color:'var(--thresh-color)' }}>
@@ -108,7 +109,7 @@ export default function AnomalyScoreChart({ history }) {
             />
             <Tooltip content={<CustomTooltip />} />
 
-            {/* Shade area above threshold red */}
+            {/* Threshold line */}
             {thresh && (
               <ReferenceLine
                 y={thresh}
@@ -125,16 +126,16 @@ export default function AnomalyScoreChart({ history }) {
               />
             )}
 
-            {/* Error area — red above threshold, dimmed below */}
+            {/* Error area */}
             <Area
               type="monotone"
               dataKey="error"
-              fill="rgba(248,113,113,0.08)"
+              fill="rgba(250,204,21,0.06)"
               stroke="none"
               isAnimationActive={false}
             />
 
-            {/* Error line — coloured by severity */}
+            {/* Error line — warning dots above threshold */}
             <Line
               type="monotone"
               dataKey="error"
@@ -147,8 +148,7 @@ export default function AnomalyScoreChart({ history }) {
                   <circle
                     key={`dot-${cx}-${cy}`}
                     cx={cx} cy={cy} r={3}
-                    fill={payload.severity === 'CRITICAL'
-                      ? 'var(--critical)' : 'var(--warning)'}
+                    fill='var(--warning)'
                     stroke="none"
                   />
                 )
@@ -159,7 +159,7 @@ export default function AnomalyScoreChart({ history }) {
         </ResponsiveContainer>
       )}
 
-      {/* Live anomaly count */}
+      {/* Live count */}
       {data.length > 0 && (
         <div style={{
           display:    'flex',
@@ -168,7 +168,7 @@ export default function AnomalyScoreChart({ history }) {
           paddingTop: '8px',
           borderTop:  '1px solid var(--border)',
         }}>
-          {['NORMAL','WARNING','CRITICAL'].map(sev => {
+          {['NORMAL','WARNING'].map(sev => {
             const count = data.filter(d => d.severity === sev).length
             return (
               <div key={sev} style={{ textAlign:'center' }}>
@@ -179,9 +179,7 @@ export default function AnomalyScoreChart({ history }) {
                   fontFamily: 'var(--font-mono)',
                   fontSize:   '14px',
                   fontWeight: '600',
-                  color: sev==='NORMAL' ? 'var(--normal)'
-                       : sev==='WARNING' ? 'var(--warning)'
-                       : 'var(--critical)',
+                  color: sev === 'NORMAL' ? 'var(--normal)' : 'var(--warning)',
                 }}>
                   {count}
                 </div>

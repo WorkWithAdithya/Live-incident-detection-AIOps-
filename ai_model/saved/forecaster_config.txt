@@ -1,0 +1,5 @@
+horizon=24
+lookback=60
+log_interval_sec=5
+forecast_seconds=120
+forecast_minutes=2.0

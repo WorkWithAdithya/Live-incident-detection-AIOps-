@@ -1,0 +1,109 @@
+# docker-compose.yml
+# ══════════════════════════════════════════════════════════════════
+# AIOps Live Incident Detection — Full Docker Setup
+#
+# Services:
+#   log_generator  — collects host metrics → NeonDB (always running)
+#   backend        — FastAPI + LSTM inference (always running)
+#   frontend       — React + Vite dashboard (always running)
+#   ai_model       — trains LSTM models (run on-demand, then exits)
+#
+# Shared volume:
+#   model_artifacts — ai_model/saved/ shared between ai_model and backend
+#                     so trained models are immediately available for inference
+#
+# Usage:
+#   docker compose up -d                        # start log_generator + backend + frontend
+#   docker compose run ai_model                 # train all models (one-time)
+#   docker compose run ai_model train-fc-real   # retrain forecaster on real data
+#   docker compose restart backend              # reload models after retraining
+#
+# Dashboard: http://localhost:5173
+# API:       http://localhost:8000
+# ══════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── Log Generator ─────────────────────────────────────────────
+  # Collects real system metrics (CPU, Memory, Disk) via psutil
+  # and writes to NeonDB every LOG_INTERVAL_SECONDS.
+  #
+  # network_mode: host is REQUIRED so psutil reads the HOST machine's
+  # metrics, not the container's isolated view.
+  log_generator:
+    build:
+      context: ./log_generator
+      dockerfile: Dockerfile
+    container_name: aiops-log-generator
+    network_mode: host
+    env_file:
+      - ./log_generator/.env
+    restart: unless-stopped
+
+  # ── AI Model (Training) ──────────────────────────────────────
+  # Trains LSTM Autoencoder + Forecaster models.
+  # Writes trained artifacts to the shared model_artifacts volume.
+  #
+  # This is NOT an always-running service — run it on-demand:
+  #   docker compose run ai_model              # train everything
+  #   docker compose run ai_model train-ae     # autoencoder only
+  #   docker compose run ai_model train-fc     # forecaster (synthetic)
+  #   docker compose run ai_model train-fc-real # forecaster (real data)
+  #   docker compose run ai_model check-data   # check data availability
+  #   docker compose run ai_model evaluate     # run evaluation
+  ai_model:
+    build:
+      context: ./ai_model
+      dockerfile: Dockerfile
+    container_name: aiops-trainer
+    env_file:
+      - ./log_generator/.env
+    volumes:
+      - model_artifacts:/app/saved
+    profiles:
+      - training
+
+  # ── Backend (FastAPI) ─────────────────────────────────────────
+  # Loads trained models from the shared volume, runs inference
+  # on every DB poll cycle, serves REST API + SSE stream.
+  backend:
+    build:
+      context: ./frontend/backend
+      dockerfile: Dockerfile
+    container_name: aiops-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./log_generator/.env
+    volumes:
+      # Mount the trained model artifacts (read-only for backend)
+      - model_artifacts:/app/ai_model_saved:ro
+      # Mount the ai_model source so backend can import model classes
+      - ./ai_model:/app/ai_model:ro
+    environment:
+      # Override the saved dir path to point to the volume mount
+      - SAVED_DIR=/app/ai_model_saved
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - log_generator
+    restart: unless-stopped
+
+  # ── Frontend (React + Vite) ──────────────────────────────────
+  # Dashboard UI — connects to backend via proxy.
+  frontend:
+    build:
+      context: ./frontend/ui
+      dockerfile: Dockerfile
+    container_name: aiops-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+# ── Shared Volumes ─────────────────────────────────────────────
+volumes:
+  model_artifacts:
+    driver: local

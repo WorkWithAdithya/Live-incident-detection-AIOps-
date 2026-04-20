@@ -1,5 +1,9 @@
 // src/components/LogTable.jsx
+// Shows last 10 logs — oldest at top, newest at bottom.
+
 import { useEffect, useRef } from 'react'
+
+const VISIBLE_ROWS = 10
 
 function formatTs(ts) {
   if (!ts) return '—'
@@ -14,18 +18,17 @@ const COL = {
   cpu:    { label:'CPU Usage',     width:'100px', align:'right'  },
   memory: { label:'Memory Usage',  width:'110px', align:'right'  },
   disk:   { label:'Disk Usage',    width:'100px', align:'right'  },
-  // REMOVED: error (Anomaly Score) column
   status: { label:'Status',        width:'95px',  align:'center' },
 }
 
 export default function LogTable({ history, limits = {}, rowSeverity }) {
-  const tbodyRef = useRef(null)
-  const prevLen  = useRef(0)
+  const scrollRef = useRef(null)
+  const prevLen   = useRef(0)
 
+  // Auto-scroll to bottom when new rows arrive
   useEffect(() => {
-    if (history.length > prevLen.current) {
-      const wrapper = tbodyRef.current?.closest('[data-scroll]')
-      if (wrapper) wrapper.scrollTop = wrapper.scrollHeight
+    if (history.length > prevLen.current && scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
     prevLen.current = history.length
   }, [history])
@@ -51,6 +54,9 @@ export default function LogTable({ history, limits = {}, rowSeverity }) {
       background: overCrit ? 'rgba(248,113,113,.05)' : overWarn ? 'rgba(250,204,21,.04)' : 'transparent',
     }
   }
+
+  // Only show the last VISIBLE_ROWS — oldest first, newest last
+  const visible = history.slice(-VISIBLE_ROWS)
 
   return (
     <div className="panel" style={{ display:'flex', flexDirection:'column' }}>
@@ -81,23 +87,23 @@ export default function LogTable({ history, limits = {}, rowSeverity }) {
         </div>
       )}
 
-      <div data-scroll style={{ overflowY:'auto', maxHeight:'200px', border:'1px solid var(--border)', borderRadius:'var(--radius)' }}>
+      <div ref={scrollRef} data-scroll style={{ overflowY:'auto', maxHeight:'200px', border:'1px solid var(--border)', borderRadius:'var(--radius)' }}>
         <table style={{ width:'100%', borderCollapse:'collapse', tableLayout:'fixed' }}>
           <thead>
             <tr>{Object.values(COL).map(col => <th key={col.label} style={thStyle(col)}>{col.label}</th>)}</tr>
           </thead>
-          <tbody ref={tbodyRef}>
-            {history.length === 0 ? (
+          <tbody>
+            {visible.length === 0 ? (
               <tr>
                 <td colSpan={5} style={{ padding:'24px', textAlign:'center', color:'var(--text-dimmer)', fontFamily:'var(--font-mono)', fontSize:'11px' }}>
                   Waiting for logs...
                 </td>
               </tr>
             ) : (
-              [...history].reverse().map((row, i) => {
+              visible.map((row, i) => {
                 const sev = rowSeverity ? rowSeverity(row, limits) : (row.severity ?? 'NORMAL')
                 return (
-                  <tr key={i}>
+                  <tr key={row.id ?? i}>
                     <td style={{ padding:'6px 10px', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--text-dim)', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>
                       {formatTs(row.timestamp)}
                     </td>
@@ -110,7 +116,6 @@ export default function LogTable({ history, limits = {}, rowSeverity }) {
                     <td style={metricStyle(COL.disk,   row.disk,   'disk_warning',   'disk_critical')}>
                       {row.disk?.toFixed(2)}%
                     </td>
-                    {/* REMOVED: Anomaly Score <td> */}
                     <td style={{ padding:'6px 10px', textAlign:'center', borderBottom:'1px solid var(--border)' }}>
                       <span className={`badge ${sev}`}>{sev}</span>
                     </td>
