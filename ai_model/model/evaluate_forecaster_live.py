@@ -50,7 +50,7 @@ MODEL_PATH      = SAVE_DIR / "lstm_forecaster.pth"
 SCALER_PATH     = SAVE_DIR / "scaler.pkl"
 
 LOOKBACK        = 60
-HORIZON         = 12
+HORIZON         = 24
 HIDDEN_SIZE     = 128
 NUM_LAYERS      = 2
 DROPOUT         = 0.2

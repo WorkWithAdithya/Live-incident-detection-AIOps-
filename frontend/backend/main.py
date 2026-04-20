@@ -1,14 +1,12 @@
 """
 frontend/backend/main.py
 ------------------------
-FastAPI backend — Phase 2 update.
+FastAPI backend — Docker-compatible.
 
-Changes from Phase 1:
-  - AppState now stores user limits (forwarded to InferenceEngine.run())
-  - POST /limits    : frontend sends current user-set metric limits
-  - GET  /forecast  : returns latest forecast snapshot on demand
-  - SSE stream      : each event now includes forecast + forecast_breaches
-  - InferenceEngine.run(limits) called with current limits every cycle
+Path resolution:
+  - SAVED_DIR env var → where trained model artifacts live (Docker volume)
+  - Falls back to ../../ai_model/saved for local dev without Docker
+  - AI_MODEL_DIR → where model Python source lives (for imports)
 """
 
 import os
@@ -29,10 +27,21 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
+# Docker: SAVED_DIR=/app/ai_model_saved, ai_model source at /app/ai_model
+# Local:  relative paths from frontend/backend/
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-_AI_MODEL_DIR = _PROJECT_ROOT / "ai_model"
-_SAVED_DIR    = _AI_MODEL_DIR / "saved"
-_ENV_PATH     = _PROJECT_ROOT / "log_generator" / ".env"
+
+# Model artifacts (weights, scalers, threshold, config)
+_SAVED_DIR = Path(os.getenv("SAVED_DIR",
+                             str(_PROJECT_ROOT / "ai_model" / "saved")))
+
+# Model Python source (for importing model classes)
+_AI_MODEL_DIR = Path(os.getenv("AI_MODEL_DIR",
+                                str(_PROJECT_ROOT / "ai_model")))
+
+# .env for DB credentials and config
+_ENV_PATH = Path(os.getenv("ENV_PATH",
+                            str(_PROJECT_ROOT / "log_generator" / ".env")))
 
 sys.path.insert(0, str(_AI_MODEL_DIR))
 load_dotenv(dotenv_path=_ENV_PATH)
@@ -51,8 +60,7 @@ class AppState:
     engine:          Optional[InferenceEngine] = None
     session_metrics: SessionMetrics            = SessionMetrics()
     alerts:          list                      = []
-    latest_forecast: list                      = []   # last forecaster output
-    # User-set limits — updated by POST /limits, passed to engine.run()
+    latest_forecast: list                      = []
     limits: dict = {
         "cpu_warning":    None,
         "cpu_critical":   None,
@@ -123,7 +131,10 @@ def db_max_id() -> int:
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 AIOps backend starting...")
+    print(f"🚀 AIOps backend starting...")
+    print(f"   SAVED_DIR     = {_SAVED_DIR}")
+    print(f"   AI_MODEL_DIR  = {_AI_MODEL_DIR}")
+    print(f"   ENV_PATH      = {_ENV_PATH}")
     try:
         state.engine = InferenceEngine(_SAVED_DIR)
     except Exception as e:
@@ -205,7 +216,7 @@ def load_model():
 def reload_forecaster():
     """
     Hot-reloads just the forecaster without restarting the server.
-    Call this after running python -m model.train_forecaster.
+    Reads horizon/lookback from forecaster_config.txt (not hardcoded).
     """
     if state.engine is None:
         raise HTTPException(status_code=400, detail="Load the main model first")
@@ -217,23 +228,33 @@ def reload_forecaster():
                 "message": f"lstm_forecaster.pth not found at {fc_path}. Train it first.",
                 "looked_at": str(fc_path),
             }
-        import sys as _sys, torch, traceback
-        _ai_model_dir = str(_SAVED_DIR.parent)
+        import sys as _sys, torch
+        _ai_model_dir = str(_AI_MODEL_DIR)
         if _ai_model_dir not in _sys.path:
             _sys.path.insert(0, _ai_model_dir)
         from model.lstm_forecaster import LSTMForecaster
+        from inference_engine import _load_forecaster_config
+
+        # Read horizon/lookback from config (not hardcoded)
+        horizon, lookback = _load_forecaster_config(_SAVED_DIR)
+
         fc = LSTMForecaster(
             input_size=3, hidden_size=128, num_layers=2,
-            dropout=0.2, lookback=60, horizon=12,
+            dropout=0.2, lookback=lookback, horizon=horizon,
         )
         fc.load_state_dict(torch.load(str(fc_path), map_location="cpu", weights_only=True))
         fc.eval()
         state.engine.forecaster       = fc
+        state.engine.fc_horizon        = horizon
+        state.engine.fc_lookback       = lookback
         state.engine.forecaster_ready = True
         return {
             "success"         : True,
             "forecaster_ready": True,
-            "message"         : f"Forecaster loaded from {fc_path}",
+            "horizon"         : horizon,
+            "lookback"        : lookback,
+            "message"         : f"Forecaster loaded from {fc_path} "
+                                f"(horizon={horizon}, lookback={lookback})",
         }
     except Exception as e:
         import traceback
@@ -243,8 +264,6 @@ def reload_forecaster():
 
 @app.get("/model/debug-paths")
 def debug_paths():
-    """Returns resolved paths so you can verify the backend is looking in the right place."""
-    import os
     saved_contents = []
     if _SAVED_DIR.exists():
         saved_contents = [f.name for f in _SAVED_DIR.iterdir()]
@@ -272,10 +291,6 @@ def set_threshold(req: ThresholdRequest):
 
 @app.post("/limits")
 def set_limits(req: LimitsRequest):
-    """
-    Receives the user-set metric limits from the frontend.
-    Stored in AppState and forwarded to engine.run() on every SSE cycle.
-    """
     state.limits = req.dict()
     return {"success": True, "limits": state.limits}
 
@@ -301,10 +316,6 @@ def get_alerts(n: int = 50):
 
 @app.get("/forecast")
 def get_forecast():
-    """
-    Returns the latest LSTM forecast snapshot.
-    The frontend can poll this on demand (e.g. on page load).
-    """
     return {
         "forecast"        : state.latest_forecast,
         "forecaster_ready": state.engine.forecaster_ready if state.engine else False,
@@ -359,12 +370,6 @@ def email_status():
 # ── SSE Stream ────────────────────────────────────────────────────────────────
 
 async def inference_stream():
-    """
-    SSE generator — every LOG_INTERVAL_SECONDS:
-      1. Fetch new DB rows since last poll (by id)
-      2. Run BOTH models via engine.run(limits)
-      3. Push each new row enriched with detection + forecast data
-    """
     last_id = db_max_id()
 
     while True:
@@ -375,24 +380,20 @@ async def inference_stream():
             continue
 
         try:
-            # ── Fetch new rows ────────────────────────────────────────────────
             new_rows = db_fetch_logs(limit=50, after_id=last_id)
 
             if not new_rows:
                 yield f"data: {json.dumps({'status': 'no_new_rows', 'last_id': last_id})}\n\n"
                 continue
 
-            # ── Run both models with current user limits ───────────────────────
             result = state.engine.run(limits=state.limits)
 
             if result.get("status") != "ok":
                 yield f"data: {json.dumps({'status': result.get('status', 'error')})}\n\n"
                 continue
 
-            # Cache latest forecast for GET /forecast
             state.latest_forecast = result.get("forecast", [])
 
-            # ── Push one SSE event per new DB row ─────────────────────────────
             for row in new_rows:
                 last_id = max(last_id, row["id"])
 
@@ -403,7 +404,6 @@ async def inference_stream():
                     "cpu"              : row["cpu"],
                     "memory"           : row["memory"],
                     "disk"             : row["disk"],
-                    # Detection (autoencoder)
                     "error"            : result["error"],
                     "threshold"        : result["threshold"],
                     "error_ratio"      : result["error_ratio"],
@@ -412,26 +412,22 @@ async def inference_stream():
                     "actual_rows"      : result["actual_rows"],
                     "warming_up"       : result["warming_up"],
                     "flagged"          : result["flagged_metrics"],
-                    # Prediction (forecaster)
                     "forecast"         : result["forecast"],
                     "forecast_breaches": result["forecast_breaches"],
                     "forecaster_ready" : result["forecaster_ready"],
                 }
 
-                # Track session metrics
                 state.session_metrics.update(
                     is_anomaly = entry["is_anomaly"],
                     error      = entry["error"],
                     threshold  = entry["threshold"],
                 )
 
-                # Store LSTM anomaly alerts
                 if entry["is_anomaly"]:
                     state.alerts.append(entry)
                     if len(state.alerts) > state.MAX_ALERTS:
                         state.alerts.pop(0)
 
-                # ── Email: LSTM detection anomaly ─────────────────────────
                 if entry["severity"] in ("WARNING", "CRITICAL"):
                     email_notifier.notify(
                         severity       = entry["severity"],
@@ -446,7 +442,6 @@ async def inference_stream():
                         },
                     )
 
-                # ── Email: LSTM forecaster predicted breach ────────────────────
                 forecast_breaches = entry.get("forecast_breaches", [])
                 if forecast_breaches:
                     worst_sev = (

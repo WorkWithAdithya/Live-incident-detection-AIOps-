@@ -1,8 +1,4 @@
-// src/App.jsx — Phase 3+4
-// Key changes:
-//   - passes `latest` (full SSE row with forecast) to PredictionPanel
-//   - calls syncLimits() so backend engine.run() uses user thresholds
-//   - AnomalyScoreChart and ROCChart removed (Phase 4 cleanup)
+// src/App.jsx — Warning-only (no critical level)
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Header          from './components/Header.jsx'
@@ -22,23 +18,20 @@ const DEFAULT_LIMITS = {
 }
 
 function getSeverity(row, limits) {
-  let worst = 'NORMAL'
   for (const key of ['cpu','memory','disk']) {
     const val=row[key]; if(val==null) continue
-    const c=limits[`${key}_critical`], w=limits[`${key}_warning`]
-    if(c!=null&&val>c) return 'CRITICAL'
-    if(w!=null&&val>w) worst='WARNING'
+    const w=limits[`${key}_warning`]
+    if(w!=null&&val>w) return 'WARNING'
   }
-  return worst
+  return 'NORMAL'
 }
 
 function getExceeded(row, limits) {
   const exceeded=[]
   for(const[key,label]of[['cpu','CPU'],['memory','Memory'],['disk','Disk']]) {
     const val=row[key]; if(val==null) continue
-    const c=limits[`${key}_critical`], w=limits[`${key}_warning`]
-    if(c!=null&&val>c) exceeded.push(`${label} ${val.toFixed(1)}% > ${c}% (critical)`)
-    else if(w!=null&&val>w) exceeded.push(`${label} ${val.toFixed(1)}% > ${w}% (warning)`)
+    const w=limits[`${key}_warning`]
+    if(w!=null&&val>w) exceeded.push(`${label} ${val.toFixed(1)}% > ${w}% (warning)`)
   }
   return exceeded
 }
@@ -74,7 +67,7 @@ export default function App() {
           forecast:[],forecast_breaches:[],forecaster_ready:status?.forecaster_ready??false}))
         setHistory(enriched); historyRef.current=enriched
         if(enriched.length) setLatest(enriched[enriched.length-1])
-        setAlerts(alts.filter(a=>a.severity==='WARNING'||a.severity==='CRITICAL').map(a=>({...a,source:'lstm'})))
+        setAlerts(alts.filter(a=>a.severity==='WARNING').map(a=>({...a,source:'lstm'})))
       }catch(e){console.error('Init failed:',e)}
     }
     init()
@@ -98,13 +91,12 @@ export default function App() {
         newAlerts.push(ruleAlert)
         const tInfo={},lim=limitsRef.current
         for(const[key,label]of[['cpu','CPU'],['memory','Memory'],['disk','Disk']]){
-          if(lim[`${key}_warning`]!=null)  tInfo[`${label} Warning`] =lim[`${key}_warning`]
-          if(lim[`${key}_critical`]!=null) tInfo[`${label} Critical`]=lim[`${key}_critical`]
+          if(lim[`${key}_warning`]!=null) tInfo[`${label} Warning`]=lim[`${key}_warning`]
         }
         sendRuleAlert({severity:ruleAlert.severity,cpu:data.cpu,memory:data.memory,
           disk:data.disk,exceeded:ruleAlert.exceeded,threshold_info:tInfo})
       }
-      if(data.is_anomaly&&(data.severity==='WARNING'||data.severity==='CRITICAL'))
+      if(data.is_anomaly&&data.severity==='WARNING')
         newAlerts.push({...data,source:'lstm'})
       if(newAlerts.length>0)
         setAlerts(prev=>{const next=[...prev,...newAlerts];return next.length>MAX_ALERTS?next.slice(-MAX_ALERTS):next})
@@ -117,11 +109,10 @@ export default function App() {
     syncLimits(newLimits)
     const ruleAlerts=historyRef.current.map(r=>buildRuleAlert(r,newLimits)).filter(Boolean)
     if(ruleAlerts.length>0){
-      const worst=ruleAlerts.reduce((a,b)=>b.severity==='CRITICAL'?b:a.severity==='CRITICAL'?a:b,ruleAlerts[0])
+      const worst=ruleAlerts[ruleAlerts.length-1]
       const tInfo={}
       for(const[key,label]of[['cpu','CPU'],['memory','Memory'],['disk','Disk']]){
-        if(newLimits[`${key}_warning`]!=null)  tInfo[`${label} Warning`] =newLimits[`${key}_warning`]
-        if(newLimits[`${key}_critical`]!=null) tInfo[`${label} Critical`]=newLimits[`${key}_critical`]
+        if(newLimits[`${key}_warning`]!=null) tInfo[`${label} Warning`]=newLimits[`${key}_warning`]
       }
       sendRuleAlert({severity:worst.severity,cpu:worst.cpu,memory:worst.memory,
         disk:worst.disk,exceeded:worst.exceeded,threshold_info:tInfo})
@@ -153,11 +144,11 @@ export default function App() {
           <LogTable history={history} limits={limits} rowSeverity={getSeverity}/>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'14px',minHeight:'260px'}}>
             <MetricChart history={history} dataKey="memory" label="Realtime Memory Usage"
-              color="var(--mem-color)" warningLine={limits.memory_warning} criticalLine={limits.memory_critical}/>
+              color="var(--mem-color)" warningLine={limits.memory_warning}/>
             <MetricChart history={history} dataKey="cpu" label="Realtime CPU Usage"
-              color="var(--cpu-color)" warningLine={limits.cpu_warning} criticalLine={limits.cpu_critical}/>
+              color="var(--cpu-color)" warningLine={limits.cpu_warning}/>
             <MetricChart history={history} dataKey="disk" label="Realtime Disk Usage"
-              color="var(--disk-color)" warningLine={limits.disk_warning} criticalLine={limits.disk_critical}/>
+              color="var(--disk-color)" warningLine={limits.disk_warning}/>
           </div>
         </div>
         {/* Right sticky */}

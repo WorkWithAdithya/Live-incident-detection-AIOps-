@@ -1,6 +1,5 @@
 // src/components/ControlPanel.jsx
-// Clean threshold setter — no metric value display.
-// User sets Warning and Critical % for CPU, Memory, Disk.
+// Warning-only threshold setter. No critical level.
 
 import { useState } from 'react'
 
@@ -10,9 +9,8 @@ const METRICS = [
   { key: 'disk',   label: 'Disk Usage',   color: 'var(--disk-color)' },
 ]
 
-function ThresholdRow({ metricLabel, metricColor, draftWarning, draftCritical,
-                        appliedWarning, appliedCritical,
-                        onWarningChange, onCriticalChange }) {
+function ThresholdRow({ metricLabel, metricColor, draftWarning, appliedWarning,
+                        onWarningChange }) {
   return (
     <div style={{
       display:      'flex',
@@ -67,43 +65,11 @@ function ThresholdRow({ metricLabel, metricColor, draftWarning, draftCritical,
         )}
       </div>
 
-      {/* Divider */}
-      <div style={{ width: '1px', height: '28px', background: 'var(--border)', flexShrink: 0 }} />
-
-      {/* Critical input */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-        <div style={{ width: '9px', height: '9px', borderRadius: '2px', background: 'var(--critical)', flexShrink: 0 }} />
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dimmer)', width: '52px' }}>
-          Critical
-        </span>
-        <input
-          type="number"
-          min="0" max="100" step="1"
-          placeholder="—"
-          value={draftCritical}
-          onChange={e => onCriticalChange(e.target.value)}
-          style={{ width: '72px' }}
-        />
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-dimmer)' }}>%</span>
-        {appliedCritical != null && (
-          <span style={{
-            fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--critical)',
-            background: 'rgba(248,113,113,.08)', border: '1px solid rgba(248,113,113,.2)',
-            borderRadius: 'var(--radius)', padding: '1px 6px',
-          }}>
-            active: {appliedCritical}%
-          </span>
-        )}
-      </div>
-
-      {/* Severity legend for this row */}
+      {/* Severity legend */}
       <div style={{ marginLeft: 'auto', display: 'flex', gap: '10px', alignItems: 'center', flexShrink: 0 }}>
         {[
-          ['NORMAL',   'var(--normal)',   appliedWarning  != null ? `< ${appliedWarning}%`  : 'not set'],
-          ['WARNING',  'var(--warning)',  appliedWarning  != null && appliedCritical != null
-                                            ? `${appliedWarning}% – ${appliedCritical}%`
-                                            : appliedWarning != null ? `> ${appliedWarning}%` : 'not set'],
-          ['CRITICAL', 'var(--critical)', appliedCritical != null ? `> ${appliedCritical}%` : 'not set'],
+          ['NORMAL',  'var(--normal)',  appliedWarning != null ? `< ${appliedWarning}%` : 'not set'],
+          ['WARNING', 'var(--warning)', appliedWarning != null ? `> ${appliedWarning}%` : 'not set'],
         ].map(([sev, color, range]) => (
           <div key={sev} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <div style={{ width: '7px', height: '7px', borderRadius: '1px', background: color }} />
@@ -123,9 +89,9 @@ function ThresholdRow({ metricLabel, metricColor, draftWarning, draftCritical,
 export default function ControlPanel({ modelStatus, limits, onLimitsChange }) {
 
   const [drafts, setDrafts] = useState({
-    cpu_warning: '', cpu_critical: '',
-    memory_warning: '', memory_critical: '',
-    disk_warning: '', disk_critical: '',
+    cpu_warning: '',
+    memory_warning: '',
+    disk_warning: '',
   })
   const [msg, setMsg] = useState('')
 
@@ -143,45 +109,23 @@ export default function ControlPanel({ modelStatus, limits, onLimitsChange }) {
 
     for (const { key } of METRICS) {
       const wKey = `${key}_warning`
-      const cKey = `${key}_critical`
       const wVal = drafts[wKey] !== '' ? parseFloat(drafts[wKey]) : null
-      const cVal = drafts[cKey] !== '' ? parseFloat(drafts[cKey]) : null
 
       if (wVal !== null && (isNaN(wVal) || wVal < 0 || wVal > 100)) {
         flash(`✗ ${key.toUpperCase()} Warning must be between 0 and 100`)
         return
       }
-      if (cVal !== null && (isNaN(cVal) || cVal < 0 || cVal > 100)) {
-        flash(`✗ ${key.toUpperCase()} Critical must be between 0 and 100`)
-        return
-      }
-
-      const effectiveW = wVal ?? next[wKey]
-      const effectiveC = cVal ?? next[cKey]
-      if (effectiveW != null && effectiveC != null && effectiveW >= effectiveC) {
-        flash(`✗ ${key.toUpperCase()}: Warning (${effectiveW}%) must be less than Critical (${effectiveC}%)`)
-        return
-      }
 
       if (wVal !== null) next[wKey] = wVal
-      if (cVal !== null) next[cKey] = cVal
     }
 
     onLimitsChange(next)
-    setDrafts({
-      cpu_warning: '', cpu_critical: '',
-      memory_warning: '', memory_critical: '',
-      disk_warning: '', disk_critical: '',
-    })
+    setDrafts({ cpu_warning: '', memory_warning: '', disk_warning: '' })
     flash('✓ Thresholds applied')
   }
 
   function clearAll() {
-    setDrafts({
-      cpu_warning: '', cpu_critical: '',
-      memory_warning: '', memory_critical: '',
-      disk_warning: '', disk_critical: '',
-    })
+    setDrafts({ cpu_warning: '', memory_warning: '', disk_warning: '' })
     onLimitsChange({
       cpu_warning: null, cpu_critical: null,
       memory_warning: null, memory_critical: null,
@@ -198,7 +142,7 @@ export default function ControlPanel({ modelStatus, limits, onLimitsChange }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
         <div className="section-label" style={{ marginBottom: 0 }}>Detection Thresholds</div>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-dimmer)' }}>
-          Set Warning and Critical % limits per metric — leave blank to skip
+          Set Warning % limit per metric — leave blank to skip
         </span>
       </div>
 
@@ -209,11 +153,8 @@ export default function ControlPanel({ modelStatus, limits, onLimitsChange }) {
           metricLabel={label}
           metricColor={color}
           draftWarning={drafts[`${key}_warning`]}
-          draftCritical={drafts[`${key}_critical`]}
           appliedWarning={limits[`${key}_warning`]}
-          appliedCritical={limits[`${key}_critical`]}
           onWarningChange={val => updateDraft(`${key}_warning`, val)}
-          onCriticalChange={val => updateDraft(`${key}_critical`, val)}
         />
       ))}
 
@@ -232,7 +173,7 @@ export default function ControlPanel({ modelStatus, limits, onLimitsChange }) {
         {msg && (
           <span style={{
             fontFamily: 'var(--font-mono)', fontSize: '10px',
-            color: msg.startsWith('✓') ? 'var(--normal)' : 'var(--critical)',
+            color: msg.startsWith('✓') ? 'var(--normal)' : 'var(--warning)',
           }}>
             {msg}
           </span>
