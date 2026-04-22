@@ -355,13 +355,3 @@ make reload
 This project was developed as a Mini Project for M.E in Computer Science and Engineering (Cloud Computing) at Manipal School of Information Sciences, MAHE.
 
 ---
-
-## Team
-
-| Name | Reg. Number |
-|------|------------|
-| Adithya B S | 251100680014 |
-| Amrutha V M | 251100680015 |
-| Aditya Amlapure | 251100680031 |
-
-**Guide:** Dr. Sathyendranath Malli, Assistant Professor, MSIS, MAHE, Manipal
