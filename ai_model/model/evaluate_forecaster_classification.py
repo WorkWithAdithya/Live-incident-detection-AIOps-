@@ -316,7 +316,41 @@ def print_report(results: dict, thresholds: dict, source: str, n_windows: int):
 
 
 # ── Plots ─────────────────────────────────────────────────────────────────────
+# ── Accuracy Plot ────────────────────────────────────────────────────────────
 
+def plot_accuracy(results: dict):
+    """
+    Save accuracy as a separate image.
+    """
+    valid = {k: v for k, v in results.items() if v is not None}
+    if not valid:
+        return
+
+    labels = []
+    values = []
+
+    for feat, r in valid.items():
+        labels.append(r["label"])
+        values.append(r["accuracy"])
+
+    plt.figure(figsize=(6,5))
+    plt.bar(labels, values, color="#4ade80")
+
+    plt.ylim(0,1)
+    plt.ylabel("Accuracy")
+    plt.title("LSTM Forecaster — Accuracy per Metric")
+
+    for i,v in enumerate(values):
+        plt.text(i, v + 0.02, f"{v:.3f}", ha="center", fontweight="bold")
+
+    plt.grid(axis="y", alpha=0.3)
+
+    path = SAVE_DIR / "forecaster_accuracy.png"
+    plt.savefig(path, dpi=150)
+    plt.close()
+
+    print(f"📊 Accuracy plot            → {path}")
+    
 def plot_roc_curves(results: dict):
     valid = {k: v for k, v in results.items() if v is not None}
     if not valid:
@@ -629,9 +663,13 @@ def main():
 
     # ── Generate plots ────────────────────────────────────────────────────────
     print("🎨 Generating plots...")
-    plot_roc_curves(results)
-    plot_pr_curves(results)
-    plot_confusion_matrices(results)
+
+    plot_accuracy(results)           # NEW accuracy plot
+    plot_roc_curves(results)         # ROC curve
+    plot_pr_curves(results)          # Precision-Recall
+    plot_confusion_matrices(results) # Confusion matrix
+
+# Optional extra plots
     plot_metrics_summary(results)
     plot_per_step_metrics(results)
 
